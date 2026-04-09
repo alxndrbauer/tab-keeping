@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web-ext
+        run: npm install -g web-ext
+
+      - name: Sign extension (Mozilla AMO, self-distributed)
+        run: |
+          web-ext sign \
+            --api-key="${{ secrets.AMO_API_KEY }}" \
+            --api-secret="${{ secrets.AMO_API_SECRET }}" \
+            --channel=unlisted
+        # Output: web-ext-artifacts/tab_keeping-*.xpi (signed, installable without config changes)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: web-ext-artifacts/*.xpi
+          generate_release_notes: true

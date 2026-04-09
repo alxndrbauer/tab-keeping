@@ -1,0 +1,62 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Tab Keeping</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Tab Keeping</h1>
+
+    <div class="setting">
+      <label for="unloadTime">
+        Unload tabs after (minutes):
+      </label>
+      <input
+        type="number"
+        id="unloadTime"
+        min="1"
+        max="10080"
+        step="1"
+        value="30"
+      >
+    </div>
+
+    <div class="setting">
+      <label for="closeTime">
+        Close discarded tabs after (minutes):
+      </label>
+      <input
+        type="number"
+        id="closeTime"
+        min="1"
+        max="10080"
+        step="1"
+        value="1440"
+      >
+    </div>
+
+    <div class="buttons">
+      <button id="saveBtn">Save Settings</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="info">
+      <p><strong>How it works:</strong></p>
+      <ul>
+        <li>Inactive tabs are <em>unloaded</em> first (saves RAM)</li>
+        <li>Unloaded unpinned tabs are <em>closed</em> after additional time</li>
+        <li>Pinned tabs are protected from closing (but can be unloaded)</li>
+        <li>The active tab is never touched</li>
+      </ul>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
