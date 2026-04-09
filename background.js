@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Discarded timestamps — persisted to survive browser restarts.
-// tabLastActive is NOT stored: we use tab.lastAccessed from the browser instead.
 let tabDiscardedAt = {};
 
 const DEFAULT_SETTINGS = {
@@ -33,27 +31,23 @@ async function loadDiscardedAt() {
     const result = await browser.storage.local.get({ _tabDiscardedAt: {} });
     tabDiscardedAt = result._tabDiscardedAt || {};
 
-    // Prune entries for tabs that no longer exist
     const tabs = await browser.tabs.query({});
     const knownIds = new Set(tabs.map(t => String(t.id)));
-    let pruned = false;
+    let changed = false;
+
     for (const id of Object.keys(tabDiscardedAt)) {
-      if (!knownIds.has(id)) {
-        delete tabDiscardedAt[id];
-        pruned = true;
-      }
+      if (!knownIds.has(id)) { delete tabDiscardedAt[id]; changed = true; }
     }
-    // Seed discard time for already-discarded tabs we haven't seen before
     for (const tab of tabs) {
       if (tab.discarded && !tabDiscardedAt[tab.id]) {
         tabDiscardedAt[tab.id] = tab.lastAccessed || Date.now();
-        pruned = true;
+        changed = true;
       }
     }
-    if (pruned) await saveDiscardedAt();
-    console.log('[Tab Keeping] Loaded, tracking', Object.keys(tabDiscardedAt).length, 'discarded tabs');
+    if (changed) await saveDiscardedAt();
+    console.log('[Tab Keeping] Ready, tracking', Object.keys(tabDiscardedAt).length, 'discarded tabs');
   } catch (e) {
-    console.error('[Tab Keeping] Failed to load discardedAt:', e);
+    console.error('[Tab Keeping] loadDiscardedAt failed:', e);
   }
 }
 
@@ -91,48 +85,39 @@ browser.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
-// ── Main alarm ───────────────────────────────────────────────────────────────
+// ── Alarm handler ────────────────────────────────────────────────────────────
 
 browser.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'initDelay') {
-    await loadDiscardedAt();
-    return;
-  }
-
   if (alarm.name !== 'tabCheck') return;
 
   const settings = await getSettings();
   const unloadAfterMs = settings.unloadAfterMinutes * 60 * 1000;
   const closeAfterMs = settings.closeAfterMinutes * 60 * 1000;
   const now = Date.now();
-
   const tabs = await browser.tabs.query({});
 
   for (const tab of tabs) {
     if (tab.active) continue;
 
-    // Stage 1: unload inactive tabs (use tab.lastAccessed — no in-memory map needed)
     if (!tab.discarded) {
-      const lastActive = tab.lastAccessed || 0;
-      if (now - lastActive > unloadAfterMs) {
+      if (now - (tab.lastAccessed || 0) > unloadAfterMs) {
         try {
           await browser.tabs.discard(tab.id);
-          console.log(`[Tab Keeping] Unloaded tab ${tab.id}: ${tab.title}`);
+          console.log(`[Tab Keeping] Unloaded: ${tab.title}`);
         } catch (e) {
-          console.error(`[Tab Keeping] Failed to unload tab ${tab.id}:`, e);
+          console.error(`[Tab Keeping] Unload failed for tab ${tab.id}:`, e);
         }
       }
     }
 
-    // Stage 2: close discarded unpinned tabs
     if (tab.discarded && !tab.pinned) {
-      const discardedTime = tabDiscardedAt[tab.id];
-      if (discardedTime && now - discardedTime > closeAfterMs) {
+      const t = tabDiscardedAt[tab.id];
+      if (t && now - t > closeAfterMs) {
         try {
           await browser.tabs.remove(tab.id);
-          console.log(`[Tab Keeping] Closed tab ${tab.id}: ${tab.title}`);
+          console.log(`[Tab Keeping] Closed: ${tab.title}`);
         } catch (e) {
-          console.error(`[Tab Keeping] Failed to close tab ${tab.id}:`, e);
+          console.error(`[Tab Keeping] Close failed for tab ${tab.id}:`, e);
         }
       }
     }
@@ -141,11 +126,15 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 
 // ── Startup ──────────────────────────────────────────────────────────────────
 
-// Ensure the recurring check alarm exists
+// MUST be registered at top level for event pages to wake on browser start
+browser.runtime.onStartup.addListener(async () => {
+  await loadDiscardedAt();
+});
+
+browser.runtime.onInstalled.addListener(async () => {
+  await loadDiscardedAt();
+});
+
 browser.alarms.get('tabCheck').then(alarm => {
   if (!alarm) browser.alarms.create('tabCheck', { periodInMinutes: 1 });
 });
-
-// Use a one-shot alarm (not setTimeout) to load state after session restore.
-// Alarms survive background page suspension; setTimeout does not.
-browser.alarms.create('initDelay', { delayInMinutes: 0.05 }); // ~3 seconds
