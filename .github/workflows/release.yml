@@ -21,6 +21,9 @@ jobs:
       - name: Install web-ext
         run: npm install -g web-ext
 
+      - name: Lint extension
+        run: web-ext lint
+
       - name: Sign extension (Mozilla AMO, self-distributed)
         run: |
           web-ext sign \
