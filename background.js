@@ -124,15 +124,26 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// ── Ping handler (content script keepalive workaround for Zen startup bug) ───
+// ── Ping handler (content script workaround for Zen startup bug) ─────────────
+// With persistent:true the background is alive but onStartup may not fire.
+// The content script pings on every page load; if the alarm is missing we
+// know initialization was skipped and we kick it off here.
 
 browser.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.type === 'ping') return Promise.resolve({ type: 'pong' });
+  if (msg && msg.type === 'ping') {
+    browser.alarms.get('tabCheck').then(async (alarm) => {
+      if (!alarm) {
+        browser.alarms.create('tabCheck', { periodInMinutes: 1 });
+        await loadDiscardedAt();
+        console.log('[Tab Keeping] Re-initialized via content script ping (Zen startup bug workaround)');
+      }
+    });
+    return Promise.resolve({ type: 'pong' });
+  }
 });
 
 // ── Startup ──────────────────────────────────────────────────────────────────
 
-// MUST be registered at top level for event pages to wake on browser start
 browser.runtime.onStartup.addListener(async () => {
   await loadDiscardedAt();
 });
