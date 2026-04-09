@@ -4,13 +4,16 @@
 
 // Load settings when popup opens
 document.addEventListener('DOMContentLoaded', async () => {
-  const settings = await browser.storage.local.get({
-    unloadAfterMinutes: 30,
-    closeAfterMinutes: 1440
-  });
-
-  document.getElementById('unloadTime').value = settings.unloadAfterMinutes;
-  document.getElementById('closeTime').value = settings.closeAfterMinutes;
+  try {
+    const settings = await browser.storage.local.get({
+      unloadAfterMinutes: 30,
+      closeAfterMinutes: 1440
+    });
+    document.getElementById('unloadTime').value = settings.unloadAfterMinutes;
+    document.getElementById('closeTime').value = settings.closeAfterMinutes;
+  } catch (e) {
+    showStatus('Failed to load settings: ' + e.message, 'error');
+  }
 });
 
 // Save settings when button is clicked
@@ -18,7 +21,6 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
   const unloadTime = parseFloat(document.getElementById('unloadTime').value);
   const closeTime = parseFloat(document.getElementById('closeTime').value);
 
-  // Validate inputs
   if (isNaN(unloadTime) || unloadTime < 1) {
     showStatus('Invalid unload time (min 1)', 'error');
     return;
@@ -32,14 +34,16 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     return;
   }
 
-  // Save to storage
-  await browser.storage.local.set({
-    unloadAfterMinutes: unloadTime,
-    closeAfterMinutes: closeTime
-  });
-
-  showStatus('Settings saved!', 'success');
-  setTimeout(() => showStatus(''), 2000);
+  try {
+    await browser.storage.local.set({
+      unloadAfterMinutes: unloadTime,
+      closeAfterMinutes: closeTime
+    });
+    showStatus('Settings saved!', 'success');
+    setTimeout(() => showStatus(''), 2000);
+  } catch (e) {
+    showStatus('Failed to save: ' + e.message, 'error');
+  }
 });
 
 function showStatus(message, type = '') {

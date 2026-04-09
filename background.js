@@ -19,41 +19,47 @@ async function getSettings() {
 }
 
 // Persist tabDiscardedAt to storage
-function saveDiscardedAt() {
-  browser.storage.local.set({ _tabDiscardedAt: tabDiscardedAt });
+async function saveDiscardedAt() {
+  try {
+    await browser.storage.local.set({ _tabDiscardedAt: tabDiscardedAt });
+  } catch (e) {
+    console.error('[Tab Keeping] Failed to save discardedAt:', e);
+  }
 }
 
 // Initialize on startup: load persisted state and sync with current tabs
-async function initializeTabs() {
-  // Restore persisted discard timestamps
-  const stored = await browser.storage.local.get({ _tabDiscardedAt: {} });
-  tabDiscardedAt = stored._tabDiscardedAt;
+// Retries if storage is not yet ready (can happen on browser startup)
+async function initializeTabs(attempt = 1) {
+  try {
+    const stored = await browser.storage.local.get({ _tabDiscardedAt: {} });
+    tabDiscardedAt = stored._tabDiscardedAt || {};
 
-  const tabs = await browser.tabs.query({});
-  const knownTabIds = new Set(tabs.map(t => t.id));
+    const tabs = await browser.tabs.query({});
+    const knownTabIds = new Set(tabs.map(t => t.id));
 
-  // Remove stale entries for tabs that no longer exist
-  for (const id of Object.keys(tabDiscardedAt)) {
-    if (!knownTabIds.has(parseInt(id, 10))) {
-      delete tabDiscardedAt[id];
+    // Remove stale entries for tabs that no longer exist
+    for (const id of Object.keys(tabDiscardedAt)) {
+      if (!knownTabIds.has(parseInt(id, 10))) {
+        delete tabDiscardedAt[id];
+      }
+    }
+
+    for (const tab of tabs) {
+      if (tab.active) continue;
+      tabLastActive.set(tab.id, tab.lastAccessed || Date.now());
+      if (tab.discarded && !tabDiscardedAt[tab.id]) {
+        tabDiscardedAt[tab.id] = tab.lastAccessed || Date.now();
+      }
+    }
+
+    await saveDiscardedAt();
+    console.log(`[Tab Keeping] Initialized (attempt ${attempt}), tracking ${tabs.length} tabs`);
+  } catch (e) {
+    console.error(`[Tab Keeping] Init failed (attempt ${attempt}):`, e);
+    if (attempt < 5) {
+      setTimeout(() => initializeTabs(attempt + 1), 3000 * attempt);
     }
   }
-
-  for (const tab of tabs) {
-    if (tab.active) continue;
-
-    // Use tab.lastAccessed (ms since epoch) as the activity baseline
-    tabLastActive.set(tab.id, tab.lastAccessed || Date.now());
-
-    // Record discard time for tabs already discarded but not yet tracked
-    if (tab.discarded && !tabDiscardedAt[tab.id]) {
-      // We don't know when it was discarded, so use the oldest signal we have:
-      // lastAccessed is a reasonable proxy (discarded after last use)
-      tabDiscardedAt[tab.id] = tab.lastAccessed || Date.now();
-    }
-  }
-
-  saveDiscardedAt();
 }
 
 // Track tabs created during session restore (arrive after initializeTabs)
