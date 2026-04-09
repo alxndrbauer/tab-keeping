@@ -2,23 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Tab activity tracking (in-memory)
-const tabLastActive = new Map();
-
-// Discarded timestamps — persisted to survive browser restarts
+// Discarded timestamps — persisted to survive browser restarts.
+// tabLastActive is NOT stored: we use tab.lastAccessed from the browser instead.
 let tabDiscardedAt = {};
 
-// Default settings
 const DEFAULT_SETTINGS = {
   unloadAfterMinutes: 30,
   closeAfterMinutes: 1440
 };
 
 async function getSettings() {
-  return browser.storage.local.get(DEFAULT_SETTINGS);
+  try {
+    return await browser.storage.local.get(DEFAULT_SETTINGS);
+  } catch (e) {
+    console.error('[Tab Keeping] Failed to read settings:', e);
+    return DEFAULT_SETTINGS;
+  }
 }
 
-// Persist tabDiscardedAt to storage
 async function saveDiscardedAt() {
   try {
     await browser.storage.local.set({ _tabDiscardedAt: tabDiscardedAt });
@@ -27,91 +28,77 @@ async function saveDiscardedAt() {
   }
 }
 
-// Initialize on startup: load persisted state and sync with current tabs
-// Retries if storage is not yet ready (can happen on browser startup)
-async function initializeTabs(attempt = 1) {
+async function loadDiscardedAt() {
   try {
-    const stored = await browser.storage.local.get({ _tabDiscardedAt: {} });
-    tabDiscardedAt = stored._tabDiscardedAt || {};
+    const result = await browser.storage.local.get({ _tabDiscardedAt: {} });
+    tabDiscardedAt = result._tabDiscardedAt || {};
 
+    // Prune entries for tabs that no longer exist
     const tabs = await browser.tabs.query({});
-    const knownTabIds = new Set(tabs.map(t => t.id));
-
-    // Remove stale entries for tabs that no longer exist
+    const knownIds = new Set(tabs.map(t => String(t.id)));
+    let pruned = false;
     for (const id of Object.keys(tabDiscardedAt)) {
-      if (!knownTabIds.has(parseInt(id, 10))) {
+      if (!knownIds.has(id)) {
         delete tabDiscardedAt[id];
+        pruned = true;
       }
     }
-
+    // Seed discard time for already-discarded tabs we haven't seen before
     for (const tab of tabs) {
-      if (tab.active) continue;
-      tabLastActive.set(tab.id, tab.lastAccessed || Date.now());
       if (tab.discarded && !tabDiscardedAt[tab.id]) {
         tabDiscardedAt[tab.id] = tab.lastAccessed || Date.now();
+        pruned = true;
       }
     }
-
-    await saveDiscardedAt();
-    console.log(`[Tab Keeping] Initialized (attempt ${attempt}), tracking ${tabs.length} tabs`);
+    if (pruned) await saveDiscardedAt();
+    console.log('[Tab Keeping] Loaded, tracking', Object.keys(tabDiscardedAt).length, 'discarded tabs');
   } catch (e) {
-    console.error(`[Tab Keeping] Init failed (attempt ${attempt}):`, e);
-    if (attempt < 5) {
-      setTimeout(() => initializeTabs(attempt + 1), 3000 * attempt);
-    }
+    console.error('[Tab Keeping] Failed to load discardedAt:', e);
   }
 }
 
-// Track tabs created during session restore (arrive after initializeTabs)
+// ── Event listeners ──────────────────────────────────────────────────────────
+
 browser.tabs.onCreated.addListener((tab) => {
-  if (tab.active) return;
-  if (!tabLastActive.has(tab.id)) {
-    tabLastActive.set(tab.id, tab.lastAccessed || Date.now());
-  }
   if (tab.discarded && !tabDiscardedAt[tab.id]) {
     tabDiscardedAt[tab.id] = tab.lastAccessed || Date.now();
     saveDiscardedAt();
   }
 });
 
-// Track when tab becomes active
 browser.tabs.onActivated.addListener(({ tabId }) => {
-  tabLastActive.set(tabId, Date.now());
-  // If the user revisits a discarded tab, Firefox reloads it automatically —
-  // clear the discard timestamp so the close timer resets
   if (tabDiscardedAt[tabId]) {
     delete tabDiscardedAt[tabId];
     saveDiscardedAt();
   }
 });
 
-// Track discard state changes
-browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.discarded === true && !tabDiscardedAt[tabId]) {
     tabDiscardedAt[tabId] = Date.now();
     saveDiscardedAt();
   }
-
-  // Tab was reloaded/un-discarded: reset discard timer
-  if (changeInfo.discarded === false) {
+  if (changeInfo.discarded === false && tabDiscardedAt[tabId]) {
     delete tabDiscardedAt[tabId];
     saveDiscardedAt();
   }
+});
 
-  if (tab.active) {
-    tabLastActive.set(tabId, Date.now());
+browser.tabs.onRemoved.addListener((tabId) => {
+  if (tabDiscardedAt[tabId]) {
+    delete tabDiscardedAt[tabId];
+    saveDiscardedAt();
   }
 });
 
-// Cleanup when tab is removed
-browser.tabs.onRemoved.addListener((tabId) => {
-  tabLastActive.delete(tabId);
-  delete tabDiscardedAt[tabId];
-  saveDiscardedAt();
-});
+// ── Main alarm ───────────────────────────────────────────────────────────────
 
-// Main alarm handler
 browser.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'initDelay') {
+    await loadDiscardedAt();
+    return;
+  }
+
   if (alarm.name !== 'tabCheck') return;
 
   const settings = await getSettings();
@@ -124,9 +111,9 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   for (const tab of tabs) {
     if (tab.active) continue;
 
-    // Stage 1: unload inactive tabs
+    // Stage 1: unload inactive tabs (use tab.lastAccessed — no in-memory map needed)
     if (!tab.discarded) {
-      const lastActive = tabLastActive.get(tab.id) || tab.lastAccessed || 0;
+      const lastActive = tab.lastAccessed || 0;
       if (now - lastActive > unloadAfterMs) {
         try {
           await browser.tabs.discard(tab.id);
@@ -152,14 +139,13 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// Ensure alarm exists (avoid duplicates on background script restart)
+// ── Startup ──────────────────────────────────────────────────────────────────
+
+// Ensure the recurring check alarm exists
 browser.alarms.get('tabCheck').then(alarm => {
-  if (!alarm) {
-    browser.alarms.create('tabCheck', { periodInMinutes: 1 });
-  }
+  if (!alarm) browser.alarms.create('tabCheck', { periodInMinutes: 1 });
 });
 
-// Always initialize when background script starts (covers all cases:
-// browser startup, disable/enable, install, update).
-// Delay slightly to allow session restore tabs to appear.
-setTimeout(initializeTabs, 2000);
+// Use a one-shot alarm (not setTimeout) to load state after session restore.
+// Alarms survive background page suspension; setTimeout does not.
+browser.alarms.create('initDelay', { delayInMinutes: 0.05 }); // ~3 seconds
