@@ -131,14 +131,9 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 
 browser.runtime.onMessage.addListener((msg) => {
   if (msg && msg.type === 'ping') {
-    browser.alarms.get('tabCheck').then(async (alarm) => {
-      if (!alarm) {
-        browser.alarms.create('tabCheck', { periodInMinutes: 1 });
-        await loadDiscardedAt();
-        console.log('[Tab Keeping] Re-initialized via content script ping (Zen startup bug workaround)');
-      }
+    return browser.alarms.get('tabCheck').then(alarm => {
+      return { type: 'pong', initialized: !!alarm };
     });
-    return Promise.resolve({ type: 'pong' });
   }
 });
 
@@ -152,6 +147,9 @@ browser.runtime.onInstalled.addListener(async () => {
   await loadDiscardedAt();
 });
 
+// Also call unconditionally so runtime.reload() (triggered by content script)
+// properly initializes the background without needing onStartup/onInstalled.
+loadDiscardedAt();
 browser.alarms.get('tabCheck').then(alarm => {
   if (!alarm) browser.alarms.create('tabCheck', { periodInMinutes: 1 });
 });
