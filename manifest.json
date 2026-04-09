@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Tab Keeping",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Automatically unload and close inactive tabs in Zen Browser",
   "icons": {
     "16": "icons/icon-16.png",
@@ -15,8 +15,9 @@
   ],
   "background": {
     "page": "background.html",
-    "persistent": false
+    "persistent": true
   },
+  "content_security_policy": "script-src 'self' 'unsafe-inline'; object-src 'self';",
   "browser_action": {
     "default_popup": "popup.html",
     "default_title": "Tab Keeping Settings",
