@@ -56,6 +56,18 @@ async function initializeTabs() {
   saveDiscardedAt();
 }
 
+// Track tabs created during session restore (arrive after initializeTabs)
+browser.tabs.onCreated.addListener((tab) => {
+  if (tab.active) return;
+  if (!tabLastActive.has(tab.id)) {
+    tabLastActive.set(tab.id, tab.lastAccessed || Date.now());
+  }
+  if (tab.discarded && !tabDiscardedAt[tab.id]) {
+    tabDiscardedAt[tab.id] = tab.lastAccessed || Date.now();
+    saveDiscardedAt();
+  }
+});
+
 // Track when tab becomes active
 browser.tabs.onActivated.addListener(({ tabId }) => {
   tabLastActive.set(tabId, Date.now());
@@ -134,7 +146,17 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// Create alarm on startup
-browser.alarms.create('tabCheck', { periodInMinutes: 1 });
+// Ensure alarm exists (avoid duplicates on background script restart)
+browser.alarms.get('tabCheck').then(alarm => {
+  if (!alarm) {
+    browser.alarms.create('tabCheck', { periodInMinutes: 1 });
+  }
+});
 
-initializeTabs();
+// On browser startup: wait for session restore to finish before initializing
+browser.runtime.onStartup.addListener(() => {
+  setTimeout(initializeTabs, 3000);
+});
+
+// On first install or update: initialize immediately
+browser.runtime.onInstalled.addListener(initializeTabs);
