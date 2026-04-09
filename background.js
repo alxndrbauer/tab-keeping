@@ -124,6 +124,12 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+// ── Ping handler (content script keepalive workaround for Zen startup bug) ───
+
+browser.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === 'ping') return Promise.resolve({ type: 'pong' });
+});
+
 // ── Startup ──────────────────────────────────────────────────────────────────
 
 // MUST be registered at top level for event pages to wake on browser start

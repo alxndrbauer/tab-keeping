@@ -106,6 +106,10 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+browser.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === 'ping') return Promise.resolve({ type: 'pong' });
+});
+
 browser.runtime.onStartup.addListener(() => loadDiscardedAt());
 browser.runtime.onInstalled.addListener(() => loadDiscardedAt());
 browser.alarms.get('tabCheck').then(a => {
