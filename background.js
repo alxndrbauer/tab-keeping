@@ -153,10 +153,7 @@ browser.alarms.get('tabCheck').then(alarm => {
   }
 });
 
-// On browser startup: wait for session restore to finish before initializing
-browser.runtime.onStartup.addListener(() => {
-  setTimeout(initializeTabs, 3000);
-});
-
-// On first install or update: initialize immediately
-browser.runtime.onInstalled.addListener(initializeTabs);
+// Always initialize when background script starts (covers all cases:
+// browser startup, disable/enable, install, update).
+// Delay slightly to allow session restore tabs to appear.
+setTimeout(initializeTabs, 2000);
