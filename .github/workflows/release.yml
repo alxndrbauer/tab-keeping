@@ -33,7 +33,7 @@ jobs:
         # Output: web-ext-artifacts/tab_keeping-*.xpi (signed, installable without config changes)
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: web-ext-artifacts/*.xpi
           generate_release_notes: true
