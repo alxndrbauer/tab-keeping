@@ -28,6 +28,18 @@ async function saveDiscardedAt() {
 
 async function loadDiscardedAt() {
   try {
+    // Ensure default settings exist in storage (Zen may clear storage on restart)
+    const existing = await browser.storage.local.get([
+      'unloadAfterMinutes',
+      'closeAfterMinutes'
+    ]);
+    if (existing.unloadAfterMinutes === undefined || existing.closeAfterMinutes === undefined) {
+      await browser.storage.local.set({
+        unloadAfterMinutes: DEFAULT_SETTINGS.unloadAfterMinutes,
+        closeAfterMinutes: DEFAULT_SETTINGS.closeAfterMinutes
+      });
+    }
+
     const result = await browser.storage.local.get({ _tabDiscardedAt: {} });
     tabDiscardedAt = result._tabDiscardedAt || {};
 
@@ -147,9 +159,21 @@ browser.runtime.onInstalled.addListener(async () => {
   await loadDiscardedAt();
 });
 
-// Also call unconditionally so runtime.reload() (triggered by content script)
-// properly initializes the background without needing onStartup/onInstalled.
-loadDiscardedAt();
-browser.alarms.get('tabCheck').then(alarm => {
-  if (!alarm) browser.alarms.create('tabCheck', { periodInMinutes: 1 });
+// Zen Browser does not fire onStartup reliably.
+// When Zen restores sessions it creates windows, so we listen for onCreated
+// as a fallback to kick off initialization.
+browser.windows.onCreated.addListener(() => {
+  initOnce();
 });
+
+// Also try onStartup for other browsers / future Zen versions.
+browser.windows.getAll().then(() => {
+  initOnce();
+});
+
+function initOnce() {
+  loadDiscardedAt();
+  browser.alarms.get('tabCheck').then(alarm => {
+    if (!alarm) browser.alarms.create('tabCheck', { periodInMinutes: 1 });
+  });
+}

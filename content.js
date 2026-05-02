@@ -4,15 +4,31 @@
 
 // Zen Browser has a bug where extensions aren't properly initialized on startup.
 // This content script runs on the first page load and pings the background.
-// If there's no response, the extension reloads itself — fixing the initialization.
-// Ask the background if it's fully initialized (alarm running).
-// Reload the extension if the background is dead OR not properly set up.
-browser.runtime.sendMessage({ type: 'ping' })
-  .then((response) => {
-    if (!response || !response.initialized) {
-      browser.runtime.reload();
-    }
-  })
-  .catch(() => {
-    browser.runtime.reload();
-  });
+// If there's no response or the alarm is missing, the extension reloads itself.
+
+let retryCount = 0;
+const MAX_RETRIES = 5;
+
+function ping() {
+  browser.runtime.sendMessage({ type: 'ping' })
+    .then((response) => {
+      if (!response || !response.initialized) {
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          setTimeout(ping, 1000);
+        } else {
+          browser.runtime.reload();
+        }
+      }
+    })
+    .catch(() => {
+      if (retryCount < MAX_RETRIES) {
+        retryCount++;
+        setTimeout(ping, 1000);
+      } else {
+        browser.runtime.reload();
+      }
+    });
+}
+
+ping();

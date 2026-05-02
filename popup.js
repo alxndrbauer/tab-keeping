@@ -5,12 +5,14 @@
 // Load settings when popup opens
 document.addEventListener('DOMContentLoaded', async () => {
   try {
-    const settings = await browser.storage.local.get({
-      unloadAfterMinutes: 30,
-      closeAfterMinutes: 1440
-    });
-    document.getElementById('unloadTime').value = settings.unloadAfterMinutes;
-    document.getElementById('closeTime').value = settings.closeAfterMinutes;
+    const raw = await browser.storage.local.get([
+      'unloadAfterMinutes',
+      'closeAfterMinutes'
+    ]);
+    const unloadTime = raw.unloadAfterMinutes || 30;
+    const closeTime = raw.closeAfterMinutes || 1440;
+    document.getElementById('unloadTime').value = unloadTime;
+    document.getElementById('closeTime').value = closeTime;
   } catch (e) {
     showStatus('Failed to load settings: ' + e.message, 'error');
   }
